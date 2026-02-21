@@ -1070,35 +1070,35 @@ fn align_selections(cx: &mut Context) {
     let tab_width = doc.tab_width();
 
     let mut column_widths: Vec<usize> = Vec::new();
-    let mut changes = Vec::with_capacity(selection.len());
+    let mut coordinates = Vec::with_capacity(selection.len());
 
     let mut previous_line = usize::MAX;
     let mut col_idx = 0;
     let mut running_offset = 0;
 
     for range in selection {
-        let coords = visual_coords_at_pos(text, range.head, tab_width);
+        let coord = visual_coords_at_pos(text, range.head, tab_width);
         let anchor_coords = visual_coords_at_pos(text, range.anchor, tab_width);
 
-        if coords.row != anchor_coords.row {
+        if coord.row != anchor_coords.row {
             cx.editor
                 .set_error("align cannot work with multi line selections");
             return;
         }
-        if coords.row != previous_line {
+        if coord.row != previous_line {
             col_idx = 0;
             running_offset = 0;
-            previous_line = coords.row;
+            previous_line = coord.row;
         }
 
-        let width = coords.col - running_offset;
+        let width = coord.col - running_offset;
 
         match column_widths.get_mut(col_idx) {
             Some(n) => *n = (*n).max(width),
             None => column_widths.push(width),
         }
 
-        changes.push((coords, range.from()));
+        coordinates.push(coord);
 
         running_offset += width;
         col_idx += 1;
@@ -1114,22 +1114,27 @@ fn align_selections(cx: &mut Context) {
 
     previous_line = usize::MAX;
 
-    let changes = changes.into_iter().map(|(coords, insert_pos)| {
-        if coords.row != previous_line {
-            col_idx = 0;
-            running_offset = 0;
-            previous_line = coords.row;
-        }
-        let current_inserts = column_positions[col_idx] - coords.col - running_offset;
-        col_idx += 1;
-        running_offset += current_inserts;
+    let changes = coordinates
+        .into_iter()
+        .zip(selection)
+        .map(|(coords, range)| {
+            if coords.row != previous_line {
+                col_idx = 0;
+                running_offset = 0;
+                previous_line = coords.row;
+            }
+            let current_inserts = column_positions[col_idx] - coords.col - running_offset;
+            let insert_pos = range.from();
 
-        (
-            insert_pos,
-            insert_pos,
-            Some(" ".repeat(current_inserts).into()),
-        )
-    });
+            col_idx += 1;
+            running_offset += current_inserts;
+
+            (
+                insert_pos,
+                insert_pos,
+                Some(" ".repeat(current_inserts).into()),
+            )
+        });
 
     let transaction = Transaction::change(doc.text(), changes);
     doc.apply(&transaction, view.id);
